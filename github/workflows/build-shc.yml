@@ -1,74 +1,127 @@
-name: Build SmartHandController (ESP32)
+name: Build SmartHandController ESP32
 
-# Push karte hi build chalega. Phone se: GitHub app/website -> Actions -> "Run workflow" bhi chal sakta hai.
 on:
   push:
   workflow_dispatch:
 
-# ===== YAHAN SE SETTINGS BADLO =====
 env:
-  DISPLAY_OLED: SSD1306        # 0.96" OLED = SSD1306 | 1.3" OLED = SH1106 | 1.54"/2.3" = SSD1309
-  DISPLAY_LANGUAGE: L_en       # L_en = English
-  SERIAL_RADIO: WIFI_STATION   # WiFi on (OnStep ke WiFi se connect). Bluetooth: BLUETOOTH, dono: BOTH
-  SERIAL_ONSTEP: "OFF"         # wired ST4/serial band, kyunki WiFi use ho raha hai
-  SHC_REF: main                # SmartHandController ka branch/tag
-  ESP32_CORE: 2.0.17           # ESP32 Arduino core version
-# ===================================
+  DISPLAY_OLED: SSD1306
+  DISPLAY_LANGUAGE: L_en
+  SERIAL_RADIO: WIFI_STATION
+  SERIAL_ONSTEP: OFF
+  ESP32_CORE: 2.0.17
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: SmartHandController ka poora source download (src/ folder ke saath)
-        run: |
-          git clone --depth 1 --branch "$SHC_REF" https://github.com/hjd1964/SmartHandController.git SmartHandController
-          ls -la SmartHandController SmartHandController/src | head -50
-          test -f SmartHandController/src/Common.h || { echo "::error::src/Common.h nahi mila"; exit 1; }
 
-      - name: Config.h me settings lagao
-        working-directory: SmartHandController
+      # 1. Download your repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 2. Find SmartHandController source
+      - name: Locate Source
+        shell: bash
         run: |
-          setdef() {
-            if ! grep -qE "^#define[[:space:]]+$1[[:space:]]" Config.h; then
-              echo "::error::$1 Config.h me nahi mila"; exit 1
+          if [ -f "SmartHandController/SmartHandController.ino" ]; then
+            echo "SKETCH_DIR=SmartHandController" >> $GITHUB_ENV
+          elif [ -f "SmartHandController.ino" ]; then
+            echo "SKETCH_DIR=." >> $GITHUB_ENV
+          else
+            echo "::error::SmartHandController.ino not found"
+            find . -maxdepth 3 -name "*.ino"
+            exit 1
+          fi
+
+      # 3. Configure firmware
+      - name: Configure Firmware
+        shell: bash
+        run: |
+          cd "$SKETCH_DIR"
+
+          for item in \
+            "DISPLAY_OLED:$DISPLAY_OLED" \
+            "DISPLAY_LANGUAGE:$DISPLAY_LANGUAGE" \
+            "SERIAL_RADIO:$SERIAL_RADIO" \
+            "SERIAL_ONSTEP:$SERIAL_ONSTEP"
+          do
+            KEY="${item%%:*}"
+            VALUE="${item#*:}"
+
+            if ! grep -qE "^#define[[:space:]]+$KEY[[:space:]]" Config.h; then
+              echo "::error::$KEY not found in Config.h"
+              exit 1
             fi
-            sed -i -E "s|^(#define[[:space:]]+$1[[:space:]]+)[^[:space:]/]+|\1$2|" Config.h
-          }
-          setdef DISPLAY_OLED      "$DISPLAY_OLED"
-          setdef DISPLAY_LANGUAGE  "$DISPLAY_LANGUAGE"
-          setdef SERIAL_RADIO      "$SERIAL_RADIO"
-          setdef SERIAL_ONSTEP     "$SERIAL_ONSTEP"
-          echo "---- Final settings ----"
-          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_RADIO|SERIAL_ONSTEP)[[:space:]]" Config.h
 
-      - name: Arduino CLI
+            sed -i -E \
+              "s|^(#define[[:space:]]+$KEY[[:space:]]+)[^[:space:]/]+|\\1$VALUE|" \
+              Config.h
+          done
+
+          cat Config.h
+
+      # 4. Install Arduino CLI
+      - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: ESP32 core aur libraries
+      # 5. Install ESP32 board
+      - name: Install ESP32 Core
         run: |
-          URL=https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core update-index --additional-urls "$URL"
-          arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$URL"
-          arduino-cli lib install "U8g2"
+          arduino-cli config init
 
-      - name: Compile
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+          arduino-cli core update-index
+
+          arduino-cli core install esp32:esp32@${ESP32_CORE}
+
+      # 6. Install required libraries
+      - name: Install Libraries
         run: |
+          arduino-cli lib update-index
+
+          arduino-cli lib install U8g2
+
+          arduino-cli lib install Ephemeris
+
+      # 7. Compile firmware
+      - name: Compile ESP32 Firmware
+        run: |
+          mkdir -p out
+
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app" \
+            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --warnings all \
             --export-binaries \
-            --output-dir out \
-            SmartHandController
+            --output-dir "$GITHUB_WORKSPACE/out" \
+            "$GITHUB_WORKSPACE/$SKETCH_DIR"
 
-      - name: Settings aur pin list save karo
+      # 8. Save settings and pin information
+      - name: Save Build Information
         if: success()
         run: |
-          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_RADIO|SERIAL_ONSTEP)[[:space:]]" SmartHandController/Config.h > out/settings.txt
-          grep -rIn -iE "^[[:space:]]*#define.*(pin|sda|scl)" SmartHandController/src 2>/dev/null | grep -iE "pinmap|pad|keypad|esp32" > out/pins.txt || true
-          ls -la out
+          echo "ESP32 SmartHandController Build" > out/build-info.txt
+          echo "Core: $ESP32_CORE" >> out/build-info.txt
+          echo "Display: $DISPLAY_OLED" >> out/build-info.txt
+          echo "Language: $DISPLAY_LANGUAGE" >> out/build-info.txt
+          echo "Radio: $SERIAL_RADIO" >> out/build-info.txt
+          echo "OnStep: $SERIAL_ONSTEP" >> out/build-info.txt
 
-      - name: BIN files download ke liye upload
+          find . -maxdepth 3 -name "*.bin" -exec cp {} out/ \;
+
+          ls -lh out
+
+      # 9. Upload firmware
+      - name: Upload ESP32 Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartHandController-ESP32-bin
+          name: SmartHandController-ESP32-Firmware
           path: out/
+          if-no-files-found: error
+          retention-days: 14
