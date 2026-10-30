@@ -1,0 +1,74 @@
+name: Build SmartHandController (ESP32)
+
+# Push karte hi build chalega. Phone se: GitHub app/website -> Actions -> "Run workflow" bhi chal sakta hai.
+on:
+  push:
+  workflow_dispatch:
+
+# ===== YAHAN SE SETTINGS BADLO =====
+env:
+  DISPLAY_OLED: SSD1306        # 0.96" OLED = SSD1306 | 1.3" OLED = SH1106 | 1.54"/2.3" = SSD1309
+  DISPLAY_LANGUAGE: L_en       # L_en = English
+  SERIAL_RADIO: WIFI_STATION   # WiFi on (OnStep ke WiFi se connect). Bluetooth: BLUETOOTH, dono: BOTH
+  SERIAL_ONSTEP: "OFF"         # wired ST4/serial band, kyunki WiFi use ho raha hai
+  SHC_REF: main                # SmartHandController ka branch/tag
+  ESP32_CORE: 2.0.17           # ESP32 Arduino core version
+# ===================================
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SmartHandController ka poora source download (src/ folder ke saath)
+        run: |
+          git clone --depth 1 --branch "$SHC_REF" https://github.com/hjd1964/SmartHandController.git SmartHandController
+          ls -la SmartHandController SmartHandController/src | head -50
+          test -f SmartHandController/src/Common.h || { echo "::error::src/Common.h nahi mila"; exit 1; }
+
+      - name: Config.h me settings lagao
+        working-directory: SmartHandController
+        run: |
+          setdef() {
+            if ! grep -qE "^#define[[:space:]]+$1[[:space:]]" Config.h; then
+              echo "::error::$1 Config.h me nahi mila"; exit 1
+            fi
+            sed -i -E "s|^(#define[[:space:]]+$1[[:space:]]+)[^[:space:]/]+|\1$2|" Config.h
+          }
+          setdef DISPLAY_OLED      "$DISPLAY_OLED"
+          setdef DISPLAY_LANGUAGE  "$DISPLAY_LANGUAGE"
+          setdef SERIAL_RADIO      "$SERIAL_RADIO"
+          setdef SERIAL_ONSTEP     "$SERIAL_ONSTEP"
+          echo "---- Final settings ----"
+          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_RADIO|SERIAL_ONSTEP)[[:space:]]" Config.h
+
+      - name: Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: ESP32 core aur libraries
+        run: |
+          URL=https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index --additional-urls "$URL"
+          arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$URL"
+          arduino-cli lib install "U8g2"
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app" \
+            --export-binaries \
+            --output-dir out \
+            SmartHandController
+
+      - name: Settings aur pin list save karo
+        if: success()
+        run: |
+          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_RADIO|SERIAL_ONSTEP)[[:space:]]" SmartHandController/Config.h > out/settings.txt
+          grep -rIn -iE "^[[:space:]]*#define.*(pin|sda|scl)" SmartHandController/src 2>/dev/null | grep -iE "pinmap|pad|keypad|esp32" > out/pins.txt || true
+          ls -la out
+
+      - name: BIN files download ke liye upload
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartHandController-ESP32-bin
+          path: out/
