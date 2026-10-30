@@ -1,26 +1,20 @@
-name: SmartHandController ESP32 Build
+name: SmartHandController ESP32 Firmware
 
 on:
   push:
     branches:
       - main
-      - master
-
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  DISPLAY_OLED: SSD1306
-  DISPLAY_LANGUAGE: L_en
-  SERIAL_RADIO: WIFI_STATION
-  SERIAL_ONSTEP: OFF
   ESP32_CORE: 2.0.17
 
 jobs:
   build:
-    name: Build ESP32 Firmware
+    name: Build Smart Hand Controller
     runs-on: ubuntu-latest
 
     steps:
@@ -30,63 +24,42 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Show Repository Files
+      - name: Check Source Files
         run: |
-          echo "Repository files:"
-          ls -la
-          find . -maxdepth 3 -name "*.ino"
+          echo "Checking SHC source..."
 
-      - name: Find SmartHandController
+          test -f SmartHandController.ino
+          test -f Config.h
+          test -f Extended.config.h
+          test -f src/Common.h
+
+          echo "All main source files found."
+
+      - name: Configure OLED and WiFi
         shell: bash
         run: |
-          SKETCH=$(find . -maxdepth 4 -name "*.ino" | head -n 1)
-
-          if [ -z "$SKETCH" ]; then
-            echo "::error::No Arduino INO file found"
-            exit 1
-          fi
-
-          DIR=$(dirname "$SKETCH")
-
-          echo "SKETCH_DIR=$DIR" >> "$GITHUB_ENV"
-
-          echo "Found: $SKETCH"
-
-          if [ ! -f "$DIR/Config.h" ]; then
-            echo "::error::Config.h not found"
-            exit 1
-          fi
-
-      - name: Configure SmartHandController
-        shell: bash
-        run: |
-          cd "$SKETCH_DIR"
-
           setdef() {
             KEY="$1"
             VALUE="$2"
 
-            grep -qE "^#define[[:space:]]+$KEY[[:space:]]" Config.h || {
-              echo "::error::$KEY not found"
-              exit 1
-            }
+            grep -qE "^#define[[:space:]]+$KEY[[:space:]]" "$3"
 
             sed -i -E \
               "s|^(#define[[:space:]]+$KEY[[:space:]]+)[^[:space:]/]+|\\1$VALUE|" \
-              Config.h
+              "$3"
           }
 
-          setdef DISPLAY_OLED "$DISPLAY_OLED"
-          setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE"
-          setdef SERIAL_RADIO "$SERIAL_RADIO"
-          setdef SERIAL_ONSTEP "$SERIAL_ONSTEP"
+          setdef DISPLAY_LANGUAGE L_en Config.h
+          setdef DISPLAY_OLED SSD1306 Config.h
+          setdef SERIAL_ONSTEP SERIAL_IP Config.h
+          setdef SERIAL_IP_MODE STATION Extended.config.h
 
-          echo "Configuration complete"
+          echo "Configuration completed."
 
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Install ESP32 Core
+      - name: Install ESP32 Platform
         run: |
           arduino-cli config init
 
@@ -102,32 +75,41 @@ jobs:
           arduino-cli lib update-index
           arduino-cli lib install U8g2
 
-      - name: Compile Firmware
+      - name: Prepare Arduino Sketch
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/out"
+          mkdir -p build/SmartHandController
+
+          cp -a Config.h Extended.config.h \
+            Catalogs.config.h SmartHandController.ino \
+            src build/SmartHandController/
+
+          echo "Arduino sketch prepared."
+
+      - name: Compile ESP32 Firmware
+        run: |
+          mkdir -p output
 
           arduino-cli compile \
             --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --warnings all \
             --export-binaries \
-            --output-dir "$GITHUB_WORKSPACE/out" \
-            "$GITHUB_WORKSPACE/$SKETCH_DIR"
+            --output-dir output \
+            build/SmartHandController
 
-      - name: Collect Firmware Files
+      - name: Check Firmware
         if: success()
         run: |
-          find "$GITHUB_WORKSPACE" \
-            -path "$GITHUB_WORKSPACE/out" -prune -o \
-            -name "*.bin" -type f -print \
-            -exec cp {} "$GITHUB_WORKSPACE/out/" \;
+          echo "Firmware files:"
 
-          echo "Build completed"
-          ls -lh "$GITHUB_WORKSPACE/out"
+          find output -type f -name "*.bin" -ls
 
-      - name: Upload Firmware BIN
+          test -n "$(find output -type f -name "*.bin")"
+
+      - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartHandController-ESP32-Firmware
-          path: out/*.bin
+          name: SHC-ESP32-Firmware
+          path: output/*.bin
           if-no-files-found: error
           retention-days: 14
