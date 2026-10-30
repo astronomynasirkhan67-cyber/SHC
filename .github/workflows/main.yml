@@ -21,13 +21,13 @@ jobs:
 
     steps:
 
-      # 1. Checkout repository
+      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # 2. Check source files
+      # 2. Check Source Files
       - name: Check Source
         run: |
           echo "Checking SmartHandController source..."
@@ -40,7 +40,7 @@ jobs:
 
           echo "All source files found."
 
-      # 3. Configure firmware
+      # 3. Configure Firmware
       - name: Configure SmartHandController
         shell: bash
         run: |
@@ -59,12 +59,9 @@ jobs:
               "$FILE"
           }
 
-          # Config.h
           setdef DISPLAY_OLED "$DISPLAY_OLED" Config.h
           setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE" Config.h
           setdef SERIAL_ONSTEP "$SERIAL_ONSTEP" Config.h
-
-          # Extended.config.h
           setdef SERIAL_IP_MODE "$SERIAL_IP_MODE" Extended.config.h
 
           echo "Configuration completed."
@@ -79,7 +76,7 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      # 5. Install ESP32 core
+      # 5. Install ESP32 Core
       - name: Install ESP32 Core
         run: |
           arduino-cli config init
@@ -91,13 +88,13 @@ jobs:
 
           arduino-cli core install esp32:esp32@${ESP32_CORE}
 
-      # 6. Install U8g2
+      # 6. Install U8g2 Library
       - name: Install U8g2 Library
         run: |
           arduino-cli lib update-index
           arduino-cli lib install U8g2
 
-      # 7. Install Ephemeris
+      # 7. Install Ephemeris Library
       - name: Install Ephemeris Library
         run: |
           mkdir -p "$HOME/Arduino/libraries"
@@ -108,10 +105,29 @@ jobs:
 
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
 
-          echo "Ephemeris installed."
+          echo "Ephemeris installed successfully."
 
-      # 8. Prepare Arduino sketch
-      - name: Prepare Sketch
+      # 8. Fix Ephemeris PROGMEM Compatibility
+      - name: Fix Ephemeris ESP32 Compatibility
+        shell: bash
+        run: |
+          EPH="$HOME/Arduino/libraries/Ephemeris/ELP2000.hpp"
+
+          if [ ! -f "$EPH" ]; then
+            echo "::error::ELP2000.hpp not found"
+            exit 1
+          fi
+
+          if ! grep -q 'pgmspace.h' "$EPH"; then
+            sed -i '1i #include <pgmspace.h>' "$EPH"
+          fi
+
+          echo "PROGMEM compatibility fix applied."
+
+          head -n 8 "$EPH"
+
+      # 9. Prepare Arduino Sketch
+      - name: Prepare SmartHandController
         run: |
           mkdir -p build/SmartHandController
 
@@ -124,14 +140,15 @@ jobs:
 
           echo "Sketch prepared successfully."
 
-      # 9. Verify dependencies
-      - name: Verify Libraries
+      # 10. Verify Dependencies
+      - name: Verify Dependencies
         run: |
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
+          test -f "$HOME/Arduino/libraries/Ephemeris/ELP2000.hpp"
 
-          echo "All required libraries checked."
+          echo "Dependencies verified."
 
-      # 10. Compile firmware
+      # 11. Compile ESP32 Firmware
       - name: Compile ESP32
         run: |
           mkdir -p output
@@ -143,7 +160,7 @@ jobs:
             --output-dir output \
             build/SmartHandController
 
-      # 11. Verify firmware
+      # 12. Verify Firmware BIN
       - name: Verify BIN Files
         if: success()
         run: |
@@ -151,9 +168,12 @@ jobs:
 
           find output -name "*.bin" -type f -ls
 
-          test -n "$(find output -name "*.bin" -type f)"
+          if ! find output -name "*.bin" -type f | grep -q .; then
+            echo "::error::No firmware BIN files generated"
+            exit 1
+          fi
 
-      # 12. Build information
+      # 13. Save Build Information
       - name: Save Build Information
         if: success()
         run: |
@@ -166,7 +186,7 @@ jobs:
             echo "WiFi Mode: $SERIAL_IP_MODE"
           } > output/build-info.txt
 
-      # 13. Upload firmware
+      # 14. Upload Firmware
       - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
@@ -175,3 +195,4 @@ jobs:
           path: output/
           if-no-files-found: error
           retention-days: 14
+
