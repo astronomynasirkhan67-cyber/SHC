@@ -1,4 +1,4 @@
-name: SmartHandController ESP32 Auto Build
+name: SmartHandController ESP32 Build
 
 on:
   push:
@@ -10,29 +10,27 @@ permissions:
 env:
   DISPLAY_OLED: SSD1306
   DISPLAY_LANGUAGE: L_en
-  SERIAL_RADIO: WIFI_STATION
-  SERIAL_ONSTEP: OFF
+  SERIAL_ONSTEP: SERIAL_IP
+  SERIAL_IP_MODE: STATION
   ESP32_CORE: 2.0.17
 
 jobs:
   build:
-    name: Build SmartHandController Firmware
+    name: Build ESP32 Firmware
     runs-on: ubuntu-latest
 
     steps:
 
-      # 1. Download your repository
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
       # 2. Check source files
-      - name: Check SmartHandController Source
+      - name: Check Source
         run: |
-          echo "Checking repository..."
-
-          ls -la
+          echo "Checking SmartHandController source..."
 
           test -f SmartHandController.ino
           test -f Config.h
@@ -40,40 +38,48 @@ jobs:
           test -f Catalogs.config.h
           test -f src/Common.h
 
-          echo "Source files found successfully."
+          echo "All source files found."
 
-      # 3. Configure display and connection
+      # 3. Configure firmware
       - name: Configure SmartHandController
         shell: bash
         run: |
           setdef() {
             KEY="$1"
             VALUE="$2"
+            FILE="$3"
 
-            if ! grep -qE "^#define[[:space:]]+$KEY[[:space:]]" Config.h; then
-              echo "::error::$KEY not found in Config.h"
+            if ! grep -qE "^#define[[:space:]]+$KEY[[:space:]]" "$FILE"; then
+              echo "::error::$KEY not found in $FILE"
               exit 1
             fi
 
             sed -i -E \
               "s|^(#define[[:space:]]+$KEY[[:space:]]+)[^[:space:]/]+|\\1$VALUE|" \
-              Config.h
+              "$FILE"
           }
 
-          setdef DISPLAY_OLED "$DISPLAY_OLED"
-          setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE"
-          setdef SERIAL_RADIO "$SERIAL_RADIO"
-          setdef SERIAL_ONSTEP "$SERIAL_ONSTEP"
+          # Config.h
+          setdef DISPLAY_OLED "$DISPLAY_OLED" Config.h
+          setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE" Config.h
+          setdef SERIAL_ONSTEP "$SERIAL_ONSTEP" Config.h
+
+          # Extended.config.h
+          setdef SERIAL_IP_MODE "$SERIAL_IP_MODE" Extended.config.h
 
           echo "Configuration completed."
 
-          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_RADIO|SERIAL_ONSTEP)[[:space:]]" Config.h
+          echo "---- Config.h ----"
+          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_ONSTEP)[[:space:]]" Config.h
+
+          echo "---- Extended.config.h ----"
+          grep -E "^#define[[:space:]]+SERIAL_IP_MODE[[:space:]]" Extended.config.h
 
       # 4. Install Arduino CLI
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      # 5. Install ESP32 Core
+      # 5. Install ESP32 core
       - name: Install ESP32 Core
         run: |
           arduino-cli config init
@@ -91,7 +97,7 @@ jobs:
           arduino-cli lib update-index
           arduino-cli lib install U8g2
 
-      # 7. Install Ephemeris directly from GitHub
+      # 7. Install Ephemeris
       - name: Install Ephemeris Library
         run: |
           mkdir -p "$HOME/Arduino/libraries"
@@ -100,16 +106,12 @@ jobs:
             https://github.com/MarScaper/ephemeris.git \
             "$HOME/Arduino/libraries/Ephemeris"
 
-          echo "Checking Ephemeris library..."
-
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
 
-          ls -la "$HOME/Arduino/libraries/Ephemeris"
+          echo "Ephemeris installed."
 
-          echo "Ephemeris installed successfully."
-
-      # 8. Prepare Arduino Sketch
-      - name: Prepare SmartHandController
+      # 8. Prepare Arduino sketch
+      - name: Prepare Sketch
         run: |
           mkdir -p build/SmartHandController
 
@@ -120,22 +122,17 @@ jobs:
 
           cp -a src build/SmartHandController/
 
-          echo "Sketch prepared."
+          echo "Sketch prepared successfully."
 
-          ls -la build/SmartHandController
-
-      # 9. Verify libraries
-      - name: Verify Dependencies
+      # 9. Verify dependencies
+      - name: Verify Libraries
         run: |
-          echo "Checking installed libraries..."
-
-          find "$HOME/Arduino/libraries" \
-            -name "Ephemeris.h" -o -name "U8g2lib.h"
-
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
 
-      # 10. Compile ESP32 firmware
-      - name: Compile ESP32 Firmware
+          echo "All required libraries checked."
+
+      # 10. Compile firmware
+      - name: Compile ESP32
         run: |
           mkdir -p output
 
@@ -146,22 +143,17 @@ jobs:
             --output-dir output \
             build/SmartHandController
 
-      # 11. Check BIN files
-      - name: Verify Firmware
+      # 11. Verify firmware
+      - name: Verify BIN Files
         if: success()
         run: |
-          echo "Searching firmware BIN files..."
+          echo "Generated firmware:"
 
-          find output -type f -name "*.bin" -ls
+          find output -name "*.bin" -type f -ls
 
-          if ! find output -type f -name "*.bin" | grep -q .; then
-            echo "::error::No firmware BIN files generated"
-            exit 1
-          fi
+          test -n "$(find output -name "*.bin" -type f)"
 
-          echo "Firmware generated successfully."
-
-      # 12. Save build information
+      # 12. Build information
       - name: Save Build Information
         if: success()
         run: |
@@ -170,12 +162,12 @@ jobs:
             echo "ESP32 Core: $ESP32_CORE"
             echo "OLED: $DISPLAY_OLED"
             echo "Language: $DISPLAY_LANGUAGE"
-            echo "Radio: $SERIAL_RADIO"
             echo "OnStep: $SERIAL_ONSTEP"
+            echo "WiFi Mode: $SERIAL_IP_MODE"
           } > output/build-info.txt
 
       # 13. Upload firmware
-      - name: Upload ESP32 Firmware
+      - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
