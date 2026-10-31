@@ -1,0 +1,214 @@
+name: SmartHandController ESP32 Build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DISPLAY_OLED: SSD1306
+  DISPLAY_LANGUAGE: L_en
+  SERIAL_ONSTEP: SERIAL_IP
+  SERIAL_IP_MODE: STATION
+  ESP32_CORE: 2.0.17
+
+jobs:
+  build:
+    name: Build SHC ESP32 Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 1. Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 2. Check source files
+      - name: Check Source Files
+        run: |
+          echo "Checking SHC source..."
+
+          test -f SmartHandController.ino
+          test -f Config.h
+          test -f Extended.config.h
+          test -f Catalogs.config.h
+          test -f src/Common.h
+
+          echo "All source files found."
+
+      # 3. Configure firmware
+      - name: Configure SHC
+        shell: bash
+        run: |
+          setdef() {
+            KEY="$1"
+            VALUE="$2"
+            FILE="$3"
+
+            if ! grep -qE "^#define[[:space:]]+$KEY[[:space:]]" "$FILE"; then
+              echo "::error::$KEY not found in $FILE"
+              exit 1
+            fi
+
+            sed -i -E \
+              "s|^(#define[[:space:]]+$KEY[[:space:]]+)[^[:space:]/]+|\\1$VALUE|" \
+              "$FILE"
+          }
+
+          setdef DISPLAY_OLED "$DISPLAY_OLED" Config.h
+          setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE" Config.h
+          setdef SERIAL_ONSTEP "$SERIAL_ONSTEP" Config.h
+
+          setdef SERIAL_IP_MODE "$SERIAL_IP_MODE" Extended.config.h
+
+          echo "Configuration completed."
+
+          grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_ONSTEP)[[:space:]]" Config.h
+
+          grep -E "^#define[[:space:]]+SERIAL_IP_MODE[[:space:]]" Extended.config.h
+
+      # 4. Install Arduino CLI
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      # 5. Install ESP32 Core
+      - name: Install ESP32 Core
+        run: |
+          arduino-cli config init
+
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+          arduino-cli core update-index
+
+          arduino-cli core install esp32:esp32@${ESP32_CORE}
+
+      # 6. Install U8g2
+      - name: Install U8g2 Library
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install U8g2
+
+      # 7. Install correct Ephemeris
+      - name: Install OnStep Ephemeris
+        run: |
+          mkdir -p "$HOME/Arduino/libraries"
+
+          git clone --depth 1 \
+            https://github.com/hjd1964/ephemeris.git \
+            "$HOME/Arduino/libraries/Ephemeris"
+
+          test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
+
+          echo "OnStep Ephemeris installed."
+
+      # 8. Fix Ephemeris Arduino include order
+      - name: Fix Ephemeris PROGMEM
+        shell: bash
+        run: |
+          EPH="$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
+
+          if [ ! -f "$EPH" ]; then
+            echo "::error::Ephemeris.h not found"
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path.home() / "Arduino/libraries/Ephemeris/Ephemeris.h"
+          s = p.read_text()
+
+          if "#include <Arduino.h>" not in s:
+              marker = "#define Ephemeris_library"
+              if marker not in s:
+                  raise SystemExit("Ephemeris header guard not found")
+
+              s = s.replace(
+                  marker,
+                  marker + "\n#if defined(ARDUINO)\n#include <Arduino.h>\n#endif",
+                  1
+              )
+
+              p.write_text(s)
+
+          print("Arduino.h is included before Ephemeris.hpp")
+          PY
+
+          echo "Checking header:"
+          head -n 25 "$EPH"
+
+      # 9. Prepare sketch
+      - name: Prepare Arduino Sketch
+        run: |
+          mkdir -p build/SmartHandController
+
+          cp SmartHandController.ino build/SmartHandController/
+          cp Config.h build/SmartHandController/
+          cp Extended.config.h build/SmartHandController/
+          cp Catalogs.config.h build/SmartHandController/
+
+          cp -a src build/SmartHandController/
+
+          echo "Sketch prepared successfully."
+
+      # 10. Verify dependencies
+      - name: Verify Dependencies
+        run: |
+          test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
+          test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.hpp"
+          test -f "$HOME/Arduino/libraries/U8g2/src/U8g2lib.h"
+
+          echo "All main dependencies found."
+
+      # 11. Compile ESP32
+      - name: Compile ESP32 Firmware
+        run: |
+          mkdir -p output
+
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --warnings all \
+            --export-binaries \
+            --output-dir output \
+            build/SmartHandController
+
+      # 12. Verify BIN
+      - name: Verify Firmware
+        if: success()
+        run: |
+          echo "Generated BIN files:"
+
+          find output -type f -name "*.bin" -ls
+
+          if ! find output -type f -name "*.bin" | grep -q .; then
+            echo "::error::Firmware BIN not generated"
+            exit 1
+          fi
+
+      # 13. Save build information
+      - name: Save Build Information
+        if: success()
+        run: |
+          {
+            echo "SmartHandController ESP32"
+            echo "ESP32 Core: $ESP32_CORE"
+            echo "Display: $DISPLAY_OLED"
+            echo "Language: $DISPLAY_LANGUAGE"
+            echo "OnStep: $SERIAL_ONSTEP"
+            echo "WiFi: $SERIAL_IP_MODE"
+          } > output/build-info.txt
+
+      # 14. Upload firmware
+      - name: Upload Firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHC-ESP32-Firmware
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
