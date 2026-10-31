@@ -16,21 +16,21 @@ env:
 
 jobs:
   build:
-    name: Build ESP32 Firmware
+    name: Build SHC ESP32 Firmware
     runs-on: ubuntu-latest
 
     steps:
 
-      # 1. Checkout Repository
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # 2. Check Source Files
-      - name: Check Source
+      # 2. Check source files
+      - name: Check Source Files
         run: |
-          echo "Checking SmartHandController source..."
+          echo "Checking SHC source..."
 
           test -f SmartHandController.ino
           test -f Config.h
@@ -40,8 +40,8 @@ jobs:
 
           echo "All source files found."
 
-      # 3. Configure Firmware
-      - name: Configure SmartHandController
+      # 3. Configure firmware
+      - name: Configure SHC
         shell: bash
         run: |
           setdef() {
@@ -62,14 +62,13 @@ jobs:
           setdef DISPLAY_OLED "$DISPLAY_OLED" Config.h
           setdef DISPLAY_LANGUAGE "$DISPLAY_LANGUAGE" Config.h
           setdef SERIAL_ONSTEP "$SERIAL_ONSTEP" Config.h
+
           setdef SERIAL_IP_MODE "$SERIAL_IP_MODE" Extended.config.h
 
           echo "Configuration completed."
 
-          echo "---- Config.h ----"
           grep -E "^#define[[:space:]]+(DISPLAY_OLED|DISPLAY_LANGUAGE|SERIAL_ONSTEP)[[:space:]]" Config.h
 
-          echo "---- Extended.config.h ----"
           grep -E "^#define[[:space:]]+SERIAL_IP_MODE[[:space:]]" Extended.config.h
 
       # 4. Install Arduino CLI
@@ -88,46 +87,63 @@ jobs:
 
           arduino-cli core install esp32:esp32@${ESP32_CORE}
 
-      # 6. Install U8g2 Library
+      # 6. Install U8g2
       - name: Install U8g2 Library
         run: |
           arduino-cli lib update-index
           arduino-cli lib install U8g2
 
-      # 7. Install Ephemeris Library
-      - name: Install Ephemeris Library
+      # 7. Install correct Ephemeris
+      - name: Install OnStep Ephemeris
         run: |
           mkdir -p "$HOME/Arduino/libraries"
 
           git clone --depth 1 \
-            https://github.com/MarScaper/ephemeris.git \
+            https://github.com/hjd1964/ephemeris.git \
             "$HOME/Arduino/libraries/Ephemeris"
 
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
 
-          echo "Ephemeris installed successfully."
+          echo "OnStep Ephemeris installed."
 
-      # 8. Fix Ephemeris PROGMEM Compatibility
-      - name: Fix Ephemeris ESP32 Compatibility
+      # 8. Fix Ephemeris Arduino include order
+      - name: Fix Ephemeris PROGMEM
         shell: bash
         run: |
-          EPH="$HOME/Arduino/libraries/Ephemeris/ELP2000.hpp"
+          EPH="$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
 
           if [ ! -f "$EPH" ]; then
-            echo "::error::ELP2000.hpp not found"
+            echo "::error::Ephemeris.h not found"
             exit 1
           fi
 
-          if ! grep -q 'pgmspace.h' "$EPH"; then
-            sed -i '1i #include <pgmspace.h>' "$EPH"
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
 
-          echo "PROGMEM compatibility fix applied."
+          p = Path.home() / "Arduino/libraries/Ephemeris/Ephemeris.h"
+          s = p.read_text()
 
-          head -n 8 "$EPH"
+          if "#include <Arduino.h>" not in s:
+              marker = "#define Ephemeris_library"
+              if marker not in s:
+                  raise SystemExit("Ephemeris header guard not found")
 
-      # 9. Prepare Arduino Sketch
-      - name: Prepare SmartHandController
+              s = s.replace(
+                  marker,
+                  marker + "\n#if defined(ARDUINO)\n#include <Arduino.h>\n#endif",
+                  1
+              )
+
+              p.write_text(s)
+
+          print("Arduino.h is included before Ephemeris.hpp")
+          PY
+
+          echo "Checking header:"
+          head -n 25 "$EPH"
+
+      # 9. Prepare sketch
+      - name: Prepare Arduino Sketch
         run: |
           mkdir -p build/SmartHandController
 
@@ -140,16 +156,17 @@ jobs:
 
           echo "Sketch prepared successfully."
 
-      # 10. Verify Dependencies
+      # 10. Verify dependencies
       - name: Verify Dependencies
         run: |
           test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.h"
-          test -f "$HOME/Arduino/libraries/Ephemeris/ELP2000.hpp"
+          test -f "$HOME/Arduino/libraries/Ephemeris/Ephemeris.hpp"
+          test -f "$HOME/Arduino/libraries/U8g2/src/U8g2lib.h"
 
-          echo "Dependencies verified."
+          echo "All main dependencies found."
 
-      # 11. Compile ESP32 Firmware
-      - name: Compile ESP32
+      # 11. Compile ESP32
+      - name: Compile ESP32 Firmware
         run: |
           mkdir -p output
 
@@ -160,39 +177,38 @@ jobs:
             --output-dir output \
             build/SmartHandController
 
-      # 12. Verify Firmware BIN
-      - name: Verify BIN Files
+      # 12. Verify BIN
+      - name: Verify Firmware
         if: success()
         run: |
-          echo "Generated firmware:"
+          echo "Generated BIN files:"
 
-          find output -name "*.bin" -type f -ls
+          find output -type f -name "*.bin" -ls
 
-          if ! find output -name "*.bin" -type f | grep -q .; then
-            echo "::error::No firmware BIN files generated"
+          if ! find output -type f -name "*.bin" | grep -q .; then
+            echo "::error::Firmware BIN not generated"
             exit 1
           fi
 
-      # 13. Save Build Information
+      # 13. Save build information
       - name: Save Build Information
         if: success()
         run: |
           {
             echo "SmartHandController ESP32"
             echo "ESP32 Core: $ESP32_CORE"
-            echo "OLED: $DISPLAY_OLED"
+            echo "Display: $DISPLAY_OLED"
             echo "Language: $DISPLAY_LANGUAGE"
             echo "OnStep: $SERIAL_ONSTEP"
-            echo "WiFi Mode: $SERIAL_IP_MODE"
+            echo "WiFi: $SERIAL_IP_MODE"
           } > output/build-info.txt
 
-      # 14. Upload Firmware
+      # 14. Upload firmware
       - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartHandController-ESP32-Firmware
+          name: SHC-ESP32-Firmware
           path: output/
           if-no-files-found: error
           retention-days: 14
-
