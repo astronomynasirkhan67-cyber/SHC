@@ -43,15 +43,7 @@
 #define ONSTEP3_SSID             "ONSTEP" //    "ONSTEP", Wifi alternate Station SSID to connnect to.                         Adjust
 #define ONSTEP3_PASSWORD       "password" //  "password", Wifi alternate Station mode password.                               Adjust
 #define ONSTEP3_IP_ADDR     {192,168,0,1} //  ..168,0,1}, Wifi alternate Target IP Address to connect to.                     Adjust
-// CUSTOM ESP32 BUTTON CONFIGURATION
 
-#define B_PIN0 32   // OK / SELECT
-#define B_PIN1 33   // UP
-#define B_PIN2 25   // DOWN
-#define B_PIN3 27   // RIGHT
-#define B_PIN4 26   // LEFT
-#define B_PIN5 14   // FAST (F)
-#define B_PIN6 13   // SLOW (f)
 
 // All buttons active LOW
 #define B_PIN0_ACTIVE_STATE LOW
