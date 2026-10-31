@@ -43,3 +43,20 @@
 #define ONSTEP3_SSID             "ONSTEP" //    "ONSTEP", Wifi alternate Station SSID to connnect to.                         Adjust
 #define ONSTEP3_PASSWORD       "password" //  "password", Wifi alternate Station mode password.                               Adjust
 #define ONSTEP3_IP_ADDR     {192,168,0,1} //  ..168,0,1}, Wifi alternate Target IP Address to connect to.                     Adjust
+#define BUTTON_OK     32
+#define BUTTON_RIGHT  27
+#define BUTTON_LEFT   26
+#define BUTTON_DOWN   25
+#define BUTTON_UP     33
+#define BUTTON_FAST  14
+#define BUTTON_SLOW  13
+
+void setupButtons() {
+  pinMode(BUTTON_OK, INPUT_PULLUP);
+  pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(BUTTON_LEFT, INPUT_PULLUP);
+  pinMode(BUTTON_DOWN, INPUT_PULLUP);
+  pinMode(BUTTON_UP, INPUT_PULLUP);
+  pinMode(BUTTON_FAST, INPUT_PULLUP);
+  pinMode(BUTTON_SLOW, INPUT_PULLUP);
+}
