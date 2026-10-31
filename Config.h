@@ -49,6 +49,14 @@
 // Advanced users can also customize which celestial object catalogs are included or even add new catalogs using Config.catalogs.h
 
 // THAT'S IT FOR USER CONFIGURATION!
+// CUSTOM ESP32 BUTTON MAPPING
 
+#define B_PIN0 32  // OK
+#define B_PIN1 33  // UP
+#define B_PIN2 25  // DOWN
+#define B_PIN3 27  // RIGHT
+#define B_PIN4 26  // LEFT
+#define B_PIN5 14  // FAST
+#define B_PIN6 13  // SLOW
 // ---------------------------------------------------------------------------------------------------------------------------------
 #include "Extended.config.h"
