@@ -43,20 +43,24 @@
 #define ONSTEP3_SSID             "ONSTEP" //    "ONSTEP", Wifi alternate Station SSID to connnect to.                         Adjust
 #define ONSTEP3_PASSWORD       "password" //  "password", Wifi alternate Station mode password.                               Adjust
 #define ONSTEP3_IP_ADDR     {192,168,0,1} //  ..168,0,1}, Wifi alternate Target IP Address to connect to.                     Adjust
-#define BUTTON_OK     32
-#define BUTTON_RIGHT  27
-#define BUTTON_LEFT   26
-#define BUTTON_DOWN   25
-#define BUTTON_UP     33
-#define BUTTON_FAST  14
-#define BUTTON_SLOW  13
+// CUSTOM ESP32 BUTTON CONFIGURATION
 
-void setupButtons() {
-  pinMode(BUTTON_OK, INPUT_PULLUP);
-  pinMode(BUTTON_RIGHT, INPUT_PULLUP);
-  pinMode(BUTTON_LEFT, INPUT_PULLUP);
-  pinMode(BUTTON_DOWN, INPUT_PULLUP);
-  pinMode(BUTTON_UP, INPUT_PULLUP);
-  pinMode(BUTTON_FAST, INPUT_PULLUP);
-  pinMode(BUTTON_SLOW, INPUT_PULLUP);
-}
+#define B_PIN0 32   // OK / SELECT
+#define B_PIN1 33   // UP
+#define B_PIN2 25   // DOWN
+#define B_PIN3 27   // RIGHT
+#define B_PIN4 26   // LEFT
+#define B_PIN5 14   // FAST (F)
+#define B_PIN6 13   // SLOW (f)
+
+// All buttons active LOW
+#define B_PIN0_ACTIVE_STATE LOW
+#define B_PIN1_ACTIVE_STATE LOW
+#define B_PIN2_ACTIVE_STATE LOW
+#define B_PIN3_ACTIVE_STATE LOW
+#define B_PIN4_ACTIVE_STATE LOW
+#define B_PIN5_ACTIVE_STATE LOW
+#define B_PIN6_ACTIVE_STATE LOW
+
+// Button debounce
+#define BUTTON_DEBOUNCE_MS 30
